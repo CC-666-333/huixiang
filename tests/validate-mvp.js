@@ -44,6 +44,13 @@ const checks = `
   if (!app.innerHTML.includes('让他们抱一会儿')) throw new Error('Result journey is incomplete');
   if (!app.innerHTML.includes('solo-figure') || !app.innerHTML.includes('embrace-v2.png')) throw new Error('Progressive embrace artwork is missing');
   if (!app.innerHTML.includes('非人物原话')) throw new Error('Historical message disclaimer is missing');
+  if (app.innerHTML.includes('<blockquote') || app.innerHTML.includes('“' + themes[tally()].figure[3] + '”')) throw new Error('Non-verbatim message is styled as a quote');
+  if (EMBRACE_COMPLETE_AT < .95) throw new Error('Embrace completes before the visual transition is nearly finished');
+  const earlyGesture = gestureProgress(180, 170, 0);
+  const middleGesture = gestureProgress(180, 125, earlyGesture);
+  const reverseGesture = gestureProgress(180, 150, middleGesture);
+  if (!(earlyGesture > 0 && earlyGesture < .1 && middleGesture > earlyGesture)) throw new Error('Gesture progress is not gradual');
+  if (reverseGesture !== middleGesture) throw new Error('Gesture progress should remain monotonic');
   const registeredTool = document._registeredTool;
   if (registeredTool?.name !== 'complete_echo_test') throw new Error('WebMCP tool did not register');
   const toolResult = registeredTool.execute({ stage: stages[0][0], answers: questions.map(([, options]) => options[0][0]) });

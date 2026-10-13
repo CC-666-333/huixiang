@@ -54,6 +54,7 @@ const stageAffinity = {
 };
 
 const state = { view:'home', stage:null, index:0, answers:[], scores:{}, needs:{}, coping:{}, sound:false };
+const EMBRACE_COMPLETE_AT = .98;
 let audioEngine = null;
 let answerLocked = false;
 let answerTimer = null;
@@ -157,7 +158,7 @@ function renderResult() {
   const t=themes[key];
   const needMap={'need-understand':'被理解','need-clarify':'理清思路','need-courage':'获得勇气','need-direction':'找到方向'};
   const need=needMap[Object.keys(state.needs)[0]]||'看清一点';
-  app.innerHTML = `<main class="result-screen"><section class="screen"><div class="shell">${topbar(true)}<article class="result-hero"><p class="result-kicker">你现在更需要${need}</p><h1 class="result-title" tabindex="-1">${t.title}</h1><p class="result-summary">${t.summary}</p><div class="signal-row">${t.signals.map(s=>`<span>${s}</span>`).join('')}</div></article><section class="story-block"><div class="figure-monogram" aria-hidden="true">${t.figure[0].slice(0,1)}</div><div class="figure-copy"><p class="story-label">和你走过相似问题的人</p><h2 class="figure-name">${t.figure[0]}</h2><span class="figure-era">${t.figure[1]}</span><p class="figure-story">${t.figure[2]}</p><blockquote class="figure-message"><small>基于经历写给你 · 非人物原话</small><p>“${t.figure[3]}”</p></blockquote><p class="source-flag">人物内容已做基础核对，正式售卖前仍需逐条完成史料复核。</p></div></section><section class="action-block"><h3>把理解变成一步</h3><div class="action-grid"><article class="action-card"><b>现在做</b><p>${practiceFor(key)}</p></article><article class="action-card"><b>72小时内</b><p>${t.action}</p></article></div></section></div></section><section class="embrace-section"><div class="embrace-wrap"><p class="eyebrow">one more thing</p><h3>让他们抱一会儿</h3><p>两指分别按住两边，再慢慢向中间靠近。</p><div class="embrace-zone" id="embrace" tabindex="0" role="button" aria-label="双指分别按住两边，向中间滑动完成拥抱" aria-pressed="false"><div class="solo-figure solo-left" aria-hidden="true"><span class="solo-head"><i></i><i></i></span><span class="solo-body"></span></div><div class="solo-figure solo-right" aria-hidden="true"><span class="solo-head"><i></i><i></i></span><span class="solo-body"></span></div><div class="touch-point left">左手</div><div class="touch-point right">右手</div><img class="embrace-art" src="./assets/embrace-v2.png" alt="两个角色温柔拥抱" width="1365" height="1536" draggable="false"><span class="gesture-line">从两边向中间靠近</span><span class="embrace-message" aria-hidden="true">这一段，不必独自走。</span><span class="sr-only" id="embrace-status" role="status" aria-live="polite"></span></div><button class="embrace-fallback" data-action="embrace">轻触也可以完成</button></div></section><footer class="result-footer"><button class="btn btn-quiet" data-action="restart">再测一次</button></footer></main>`;
+  app.innerHTML = `<main class="result-screen"><section class="screen"><div class="shell">${topbar(true)}<article class="result-hero"><p class="result-kicker">你现在更需要${need}</p><h1 class="result-title" tabindex="-1">${t.title}</h1><p class="result-summary">${t.summary}</p><div class="signal-row">${t.signals.map(s=>`<span>${s}</span>`).join('')}</div></article><section class="story-block"><div class="figure-monogram" aria-hidden="true">${t.figure[0].slice(0,1)}</div><div class="figure-copy"><p class="story-label">和你走过相似问题的人</p><h2 class="figure-name">${t.figure[0]}</h2><span class="figure-era">${t.figure[1]}</span><p class="figure-story">${t.figure[2]}</p><aside class="figure-message" aria-label="基于人物经历提炼的寄语，不是人物原话"><small>基于经历写给你 · 非人物原话</small><p>${t.figure[3]}</p></aside><p class="source-flag">人物内容已做基础核对，正式售卖前仍需逐条完成史料复核。</p></div></section><section class="action-block"><h3>把理解变成一步</h3><div class="action-grid"><article class="action-card"><b>现在做</b><p>${practiceFor(key)}</p></article><article class="action-card"><b>72小时内</b><p>${t.action}</p></article></div></section></div></section><section class="embrace-section"><div class="embrace-wrap"><p class="eyebrow">one more thing</p><h3>让他们抱一会儿</h3><p>两指分别按住两边，再慢慢向中间靠近。</p><div class="embrace-zone" id="embrace" tabindex="0" role="button" aria-label="双指分别按住两边，向中间滑动完成拥抱" aria-pressed="false"><div class="solo-figure solo-left" aria-hidden="true"><span class="solo-head"><i></i><i></i></span><span class="solo-body"></span></div><div class="solo-figure solo-right" aria-hidden="true"><span class="solo-head"><i></i><i></i></span><span class="solo-body"></span></div><div class="touch-point left">左手</div><div class="touch-point right">右手</div><img class="embrace-art" src="./assets/embrace-v2.png" alt="两个角色温柔拥抱" width="1145" height="1374" draggable="false"><span class="gesture-line">从两边向中间靠近</span><span class="embrace-message" aria-hidden="true">这一段，不必独自走。</span><span class="sr-only" id="embrace-status" role="status" aria-live="polite"></span></div><button class="embrace-fallback" data-action="embrace">轻触也可以完成</button></div></section><footer class="result-footer"><button class="btn btn-quiet" data-action="restart">再测一次</button></footer></main>`;
   setupEmbrace();
   focusAfterRender('.result-title');
 }
@@ -222,13 +223,18 @@ function completeEmbrace() {
   audioEngine?.chime();
 }
 
+function gestureProgress(baseline,currentDistance,previousProgress=0) {
+  if(!baseline) return previousProgress;
+  return Math.max(previousProgress,(baseline-currentDistance)/(baseline*.58));
+}
+
 function setupEmbrace() {
   const zone=document.querySelector('#embrace');
   if(!zone) return;
   const pointers=new Map();
   let baseline=0;
   let progress=0;
-  const setProgress=value=>{ progress=Math.max(0,Math.min(1,value)); const travel=Math.max(72,(zone.clientWidth-180)/2); zone.style.setProperty('--travel',`${travel}px`); zone.style.setProperty('--progress',progress.toFixed(3)); if(progress>=.82) completeEmbrace(); };
+  const setProgress=value=>{ progress=Math.max(0,Math.min(1,value)); const travel=Math.max(72,(zone.clientWidth-180)/2); zone.style.setProperty('--travel',`${travel}px`); zone.style.setProperty('--progress',progress.toFixed(3)); if(progress>=EMBRACE_COMPLETE_AT) completeEmbrace(); };
   const distance=()=>{ const points=[...pointers.values()]; return points.length<2?0:Math.abs(points[0].x-points[1].x); };
   zone.addEventListener('pointerdown',event=>{
     if(zone.classList.contains('done')) return;
@@ -246,8 +252,7 @@ function setupEmbrace() {
     if(!pointers.has(event.pointerId)||pointers.size<2||!baseline) return;
     const previous=pointers.get(event.pointerId);
     pointers.set(event.pointerId,{...previous,x:event.clientX,y:event.clientY});
-    const inward=(baseline-distance())/(baseline*.58);
-    setProgress(Math.max(progress,inward));
+    setProgress(gestureProgress(baseline,distance(),progress));
   });
   const release=event=>{ pointers.delete(event.pointerId); if(!zone.classList.contains('done')&&pointers.size<2) setProgress(0); };
   zone.addEventListener('pointerup',release);
