@@ -47,6 +47,8 @@ const stageAffinity = {
 
 const state = { view:'home', stage:null, index:0, answers:[], scores:{}, needs:{}, coping:{}, sound:false };
 let audioEngine = null;
+let answerLocked = false;
+let answerTimer = null;
 
 class AmbientAudio {
   constructor() { this.context = null; this.master = null; this.nodes = []; }
@@ -106,28 +108,39 @@ function render() {
   return renderResult();
 }
 
+function focusAfterRender(selector) {
+  window.setTimeout(() => document.querySelector(selector)?.focus({ preventScroll:true }), 0);
+}
+
 function renderHome() {
-  app.innerHTML = `<a class="skip-link" href="#main">跳到正文</a><main id="main" class="home"><div class="home-top"><div class="brand"><span class="brand-mark" aria-hidden="true"></span>回响</div>${soundButton()}</div><div class="home-copy"><h1>这一刻，<br>你最像<span>谁？</span></h1><p class="home-lead">12个选择，找到一位走过相似处境的人。</p><button class="btn btn-primary" data-action="begin">开始</button><span class="home-meta">约2分钟</span></div></main>`;
+  app.innerHTML = `<a class="skip-link" href="#main">跳到正文</a><main id="main" class="home"><div class="home-top"><div class="brand"><span class="brand-mark" aria-hidden="true"></span>回响</div>${soundButton()}</div><div class="home-copy"><h1 class="home-title" tabindex="-1">这一刻，<br>你最像<span>谁？</span></h1><p class="home-lead">12个选择，找到一位走过相似处境的人。</p><button class="btn btn-primary" data-action="begin">开始</button><span class="home-meta">约2分钟</span></div></main>`;
 }
 
 function renderStage() {
-  app.innerHTML = `<main class="screen"><div class="shell">${topbar(true)}<h1 class="page-title">最近的你，处在哪种生活里？</h1><p class="page-lead">选最接近的一项。</p><div class="stage-list">${stages.map(([id,title,desc])=>`<button class="stage-card ${state.stage===id?'selected':''}" data-stage="${id}" aria-pressed="${state.stage===id}"><b>${title}</b><span>${desc}</span></button>`).join('')}</div><div class="stage-action"><button class="btn btn-primary" data-action="start-quiz" ${state.stage?'':'disabled'}>继续</button></div></div></main>`;
+  app.innerHTML = `<main class="screen"><div class="shell">${topbar(true)}<h1 class="page-title" tabindex="-1">最近的你，处在哪种生活里？</h1><p class="page-lead">选最接近的一项。</p><div class="stage-list">${stages.map(([id,title,desc])=>`<button class="stage-card ${state.stage===id?'selected':''}" data-stage="${id}" aria-pressed="${state.stage===id}"><b>${title}</b><span>${desc}</span></button>`).join('')}</div><div class="stage-action"><button class="btn btn-primary" data-action="start-quiz" ${state.stage?'':'disabled'}>继续</button></div></div></main>`;
 }
 
 function renderQuiz() {
   const q=questions[state.index];
   const selected=state.answers[state.index];
-  app.innerHTML = `<main class="screen quiz-screen"><div class="quiz-shell"><div class="quiz-top"><button class="text-button" data-action="prev" ${state.index===0?'disabled':''}>返回</button><div class="progress-dots" aria-hidden="true">${questions.map((_,i)=>`<i class="${i<=state.index?'done':''}"></i>`).join('')}</div><span class="step-count">${state.index+1}/${questions.length}</span></div><h1 class="question-title">${q[0]}</h1><div class="options">${q[1].map(([key,text],i)=>`<button class="option ${selected===key?'selected':''}" data-answer="${key}" data-key="${String.fromCharCode(65+i)}">${text}</button>`).join('')}</div><div class="quiz-bottom"><span class="hint">选第一反应</span>${soundButton()}</div></div></main>`;
+  app.innerHTML = `<main class="screen quiz-screen"><div class="quiz-shell"><div class="quiz-top"><button class="text-button" data-action="prev" ${state.index===0||answerLocked?'disabled':''}>返回</button><div class="progress-dots" aria-hidden="true">${questions.map((_,i)=>`<i class="${i<=state.index?'done':''}"></i>`).join('')}</div><span class="step-count">${state.index+1}/${questions.length}</span></div><h1 class="question-title" tabindex="-1">${q[0]}</h1><div class="options">${q[1].map(([key,text],i)=>`<button class="option ${selected===key?'selected':''}" data-answer="${key}" data-key="${String.fromCharCode(65+i)}" ${answerLocked?'disabled':''}>${text}</button>`).join('')}</div><div class="quiz-bottom"><span class="hint">选第一反应</span>${soundButton()}</div></div></main>`;
 }
 
 function tally() {
   const themeScores=Object.fromEntries(Object.keys(themes).map(k=>[k,0]));
+  const exposure=Object.fromEntries(Object.keys(themes).map(k=>[k,0]));
   const needs={},coping={};
-  state.answers.forEach(key=>{ if(themeScores[key]!==undefined) themeScores[key]++; else if(key.startsWith('need-')) needs[key]=(needs[key]||0)+1; else if(key.startsWith('state-')) coping[key]=(coping[key]||0)+1; });
+  questions.slice(0,10).flatMap(([,options])=>options).forEach(([key])=>{ if(exposure[key]!==undefined) exposure[key]++; });
+  state.answers.forEach((key,index)=>{ if(themeScores[key]!==undefined) themeScores[key]++; else if(key.startsWith('need-')) needs[key]=(needs[key]||0)+1; else if(key.startsWith('state-')) coping[key]=(coping[key]||0)+1; });
+  const affinity=stageAffinity[state.stage]||[];
+  const ranked=Object.keys(themeScores).map(key=>{
+    const normalized=themeScores[key]/exposure[key];
+    const stagePrior=Math.max(0,3-affinity.indexOf(key))*.015*(affinity.includes(key)?1:0);
+    const fingerprint=state.answers.reduce((sum,answer,index)=>sum+(answer===key?2**index:0),0)*1e-7;
+    return [key,normalized+stagePrior+fingerprint];
+  }).sort((a,b)=>b[1]-a[1]);
   state.scores=themeScores; state.needs=needs; state.coping=coping;
-  const maxScore=Math.max(...Object.values(themeScores));
-  const leaders=Object.keys(themeScores).filter(key=>themeScores[key]===maxScore);
-  return stageAffinity[state.stage]?.find(key=>leaders.includes(key))||leaders[0];
+  return ranked[0][0];
 }
 
 function renderResult() {
@@ -135,8 +148,9 @@ function renderResult() {
   const t=themes[key];
   const needMap={'need-understand':'被理解','need-clarify':'理清思路','need-courage':'获得勇气','need-direction':'找到方向'};
   const need=needMap[Object.keys(state.needs)[0]]||'看清一点';
-  app.innerHTML = `<main class="result-screen"><section class="screen"><div class="shell">${topbar(true)}<article class="result-hero"><p class="result-kicker">你现在更需要${need}</p><h1 class="result-title">${t.title}</h1><p class="result-summary">${t.summary}</p><div class="signal-row">${t.signals.map(s=>`<span>${s}</span>`).join('')}</div></article><section class="story-block"><div class="figure-monogram" aria-hidden="true">${t.figure[0].slice(0,1)}</div><div><p class="story-label">和你走过相似问题的人</p><h2 class="figure-name">${t.figure[0]}</h2><span class="figure-era">${t.figure[1]}</span><p class="figure-story">${t.figure[2]}</p><p class="source-flag">MVP人物内容，正式售卖前需逐条核验史料。</p></div></section><section class="action-block"><h3>把理解变成一步</h3><div class="action-grid"><article class="action-card"><b>现在做</b><p>${practiceFor(key)}</p></article><article class="action-card"><b>72小时内</b><p>${t.action}</p></article></div></section></div></section><section class="embrace-section"><div class="embrace-wrap"><h3>最后，收下一个拥抱</h3><p>两指按住两边，向中间靠近。</p><div class="embrace-zone" id="embrace" tabindex="0" role="button" aria-label="双指向中间滑动，完成拥抱"><div class="touch-point left">左手</div><div class="touch-point right">右手</div><img class="embrace-art" src="./assets/embrace.png" alt="两个角色温柔拥抱" draggable="false"><span class="gesture-line">向中间靠近</span><span class="embrace-message">这一段，不必独自走。</span></div><button class="embrace-fallback" data-action="embrace">轻触也可以</button></div></section><footer class="result-footer"><button class="btn btn-quiet" data-action="restart">再测一次</button></footer></main>`;
+  app.innerHTML = `<main class="result-screen"><section class="screen"><div class="shell">${topbar(true)}<article class="result-hero"><p class="result-kicker">你现在更需要${need}</p><h1 class="result-title" tabindex="-1">${t.title}</h1><p class="result-summary">${t.summary}</p><div class="signal-row">${t.signals.map(s=>`<span>${s}</span>`).join('')}</div></article><section class="story-block"><div class="figure-monogram" aria-hidden="true">${t.figure[0].slice(0,1)}</div><div><p class="story-label">和你走过相似问题的人</p><h2 class="figure-name">${t.figure[0]}</h2><span class="figure-era">${t.figure[1]}</span><p class="figure-story">${t.figure[2]}</p><p class="source-flag">MVP人物内容，正式售卖前需逐条核验史料。</p></div></section><section class="action-block"><h3>把理解变成一步</h3><div class="action-grid"><article class="action-card"><b>现在做</b><p>${practiceFor(key)}</p></article><article class="action-card"><b>72小时内</b><p>${t.action}</p></article></div></section></div></section><section class="embrace-section"><div class="embrace-wrap"><h3>最后，收下一个拥抱</h3><p>两指分别按住两边，再向中间靠近。</p><div class="embrace-zone" id="embrace" tabindex="0" role="button" aria-label="双指分别按住两边，向中间滑动完成拥抱" aria-pressed="false"><div class="touch-point left">左手</div><div class="touch-point right">右手</div><img class="embrace-art" src="./assets/embrace.png" alt="两个角色温柔拥抱" draggable="false"><span class="gesture-line">从两边向中间靠近</span><span class="embrace-message" aria-hidden="true">这一段，不必独自走。</span><span class="sr-only" id="embrace-status" role="status" aria-live="polite"></span></div><button class="embrace-fallback" data-action="embrace">轻触也可以</button></div></section><footer class="result-footer"><button class="btn btn-quiet" data-action="restart">再测一次</button></footer></main>`;
   setupEmbrace();
+  focusAfterRender('.result-title');
 }
 
 function practiceFor(key) {
@@ -144,31 +158,45 @@ function practiceFor(key) {
 }
 
 function chooseAnswer(key) {
+  if(answerLocked) return;
+  const originIndex=state.index;
+  if(!questions[originIndex]?.[1].some(([answer])=>answer===key)) return;
+  answerLocked=true;
+  if(answerTimer) window.clearTimeout(answerTimer);
   state.answers[state.index]=key;
   renderQuiz();
-  window.setTimeout(()=>{ if(state.index<questions.length-1){state.index++;render();}else{state.view='result';render();window.scrollTo({top:0,behavior:'smooth'});} },190);
+  answerTimer=window.setTimeout(()=>{
+    if(state.index!==originIndex){answerLocked=false;return;}
+    answerLocked=false;
+    answerTimer=null;
+    if(state.index<questions.length-1){state.index++;render();focusAfterRender('.question-title');}else{state.view='result';render();window.scrollTo({top:0,behavior:'smooth'});}
+  },190);
 }
 
 function toggleSound() {
   state.sound=!state.sound;
   if(!audioEngine) audioEngine=new AmbientAudio();
   if(state.sound) audioEngine.start(); else audioEngine.stop();
-  render();
+  document.querySelectorAll('[data-action="sound"]').forEach(button=>{
+    button.classList.toggle('is-on',state.sound);
+    button.setAttribute('aria-pressed',String(state.sound));
+    button.textContent=state.sound?'声音开':'声音';
+  });
 }
 
-function reset() { Object.assign(state,{view:'home',stage:null,index:0,answers:[],scores:{},needs:{},coping:{}}); render(); window.scrollTo(0,0); }
+function reset() { if(answerTimer) window.clearTimeout(answerTimer); answerTimer=null; answerLocked=false; Object.assign(state,{view:'home',stage:null,index:0,answers:[],scores:{},needs:{},coping:{}}); render(); window.scrollTo(0,0); focusAfterRender('.home-title'); }
 
 app.addEventListener('click',event=>{
   const target=event.target.closest('button');
   if(!target) return;
   const action=target.dataset.action;
-  if(action==='begin'){state.view='stage';render();}
+  if(action==='begin'){state.view='stage';render();focusAfterRender('.page-title');}
   if(action==='restart') reset();
   if(action==='sound') toggleSound();
-  if(action==='start-quiz'&&state.stage){state.view='quiz';render();}
-  if(action==='prev'&&state.index>0){state.index--;render();}
+  if(action==='start-quiz'&&state.stage){state.view='quiz';render();focusAfterRender('.question-title');}
+  if(action==='prev'&&state.index>0&&!answerLocked){state.index--;render();focusAfterRender('.question-title');}
   if(action==='embrace') completeEmbrace();
-  if(target.dataset.stage){state.stage=target.dataset.stage;render();}
+  if(target.dataset.stage){state.stage=target.dataset.stage;render();focusAfterRender(`[data-stage="${state.stage}"]`);}
   if(target.dataset.answer) chooseAnswer(target.dataset.answer);
 });
 
@@ -177,6 +205,10 @@ function completeEmbrace() {
   if(!zone||zone.classList.contains('done')) return;
   zone.style.setProperty('--progress',1);
   zone.classList.add('done');
+  zone.setAttribute('aria-pressed','true');
+  zone.setAttribute('aria-label','拥抱已完成');
+  const status=zone.querySelector('#embrace-status');
+  if(status) status.textContent='拥抱已完成。这一段，不必独自走。';
   if(navigator.vibrate) navigator.vibrate(35);
   audioEngine?.chime();
 }
@@ -189,8 +221,25 @@ function setupEmbrace() {
   let progress=0;
   const setProgress=value=>{ progress=Math.max(0,Math.min(1,value)); const travel=Math.max(72,(zone.clientWidth-180)/2); zone.style.setProperty('--travel',`${travel}px`); zone.style.setProperty('--progress',progress.toFixed(3)); if(progress>=.82) completeEmbrace(); };
   const distance=()=>{ const points=[...pointers.values()]; return points.length<2?0:Math.abs(points[0].x-points[1].x); };
-  zone.addEventListener('pointerdown',event=>{ if(zone.classList.contains('done')) return; pointers.set(event.pointerId,{x:event.clientX,y:event.clientY}); zone.setPointerCapture(event.pointerId); if(pointers.size===2) baseline=Math.max(120,distance()); });
-  zone.addEventListener('pointermove',event=>{ if(!pointers.has(event.pointerId)||pointers.size<2||!baseline) return; pointers.set(event.pointerId,{x:event.clientX,y:event.clientY}); setProgress((baseline-distance())/(baseline*.62)); });
+  zone.addEventListener('pointerdown',event=>{
+    if(zone.classList.contains('done')) return;
+    const rect=zone.getBoundingClientRect();
+    const side=event.clientX<rect.left+rect.width/2?'left':'right';
+    if([...pointers.values()].some(point=>point.side===side)) return;
+    pointers.set(event.pointerId,{x:event.clientX,y:event.clientY,side});
+    zone.setPointerCapture(event.pointerId);
+    if(pointers.size===2){
+      const startDistance=distance();
+      baseline=startDistance>=Math.min(180,rect.width*.42)?startDistance:0;
+    }
+  });
+  zone.addEventListener('pointermove',event=>{
+    if(!pointers.has(event.pointerId)||pointers.size<2||!baseline) return;
+    const previous=pointers.get(event.pointerId);
+    pointers.set(event.pointerId,{...previous,x:event.clientX,y:event.clientY});
+    const inward=(baseline-distance())/(baseline*.58);
+    setProgress(Math.max(progress,inward));
+  });
   const release=event=>{ pointers.delete(event.pointerId); if(!zone.classList.contains('done')&&pointers.size<2) setProgress(0); };
   zone.addEventListener('pointerup',release);
   zone.addEventListener('pointercancel',release);
