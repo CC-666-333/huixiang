@@ -14,6 +14,7 @@ const sandbox = {
   },
   window: {
     setTimeout(callback) { callback(); },
+    clearTimeout() {},
     scrollTo() {},
     addEventListener() {},
     AudioContext: undefined,
@@ -34,6 +35,8 @@ const checks = `
     if (key in scored) scored[key] += 1;
   });
   if (Object.values(scored).some(count => count < 3)) throw new Error('A theme is under-represented');
+  const exposureSpread = Math.max(...Object.values(scored)) - Math.min(...Object.values(scored));
+  if (exposureSpread > 1) throw new Error('Theme exposure is too uneven');
   state.stage = stages[0][0];
   state.answers = questions.map(([, options]) => options[0][0]);
   state.view = 'result';
